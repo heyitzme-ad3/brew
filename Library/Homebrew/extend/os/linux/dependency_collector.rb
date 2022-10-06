@@ -15,6 +15,7 @@ class DependencyCollector
     # gcc is required for libgcc_s.so.1 if glibc or gcc are too old
     return unless DevelopmentTools.build_system_too_old?
     return if building_global_dep_tree?
+    return unless formula_for(GCC)
     return if related_formula_names.include?(GCC)
     return if global_dep_tree[GCC]&.intersect?(related_formula_names)
 
@@ -25,6 +26,7 @@ class DependencyCollector
   def glibc_dep_if_needed(related_formula_names)
     return unless OS::Linux::Glibc.below_ci_version?
     return if building_global_dep_tree?
+    return unless formula_for(GLIBC)
     return if related_formula_names.include?(GLIBC)
     return if global_dep_tree[GLIBC]&.intersect?(related_formula_names)
 
@@ -49,15 +51,27 @@ class DependencyCollector
     built_global_dep_tree!
   end
 
+  sig { params(name: String).returns(T.nilable(Formula)) }
+  def formula_for(name)
+    @formula_for ||= {}
+    @formula_for[name] ||= Formula[name]
+  rescue FormulaUnavailableError
+    nil
+  end
+
   sig { params(name: String).returns(T::Array[String]) }
   def global_deps_for(name)
     @global_deps_for ||= {}
     # Always strip out glibc and gcc from all parts of dependency tree when
     # we're calculating their dependency trees. Other parts of Homebrew will
     # catch any circular dependencies.
-    @global_deps_for[name] ||= Formula[name].deps.map(&:name).flat_map do |dep|
-      [dep, *global_deps_for(dep)].compact
-    end.uniq
+    @global_deps_for[name] ||= if (formula = formula_for(name))
+      formula.deps.map(&:name).flat_map do |dep|
+        [dep, *global_deps_for(dep)].compact
+      end.uniq
+    else
+      []
+    end
   end
 
   # Use class variables to avoid this expensive logic needing to be done more
